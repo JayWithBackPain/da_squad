@@ -1,0 +1,24 @@
+database:
+  redshift:
+    driver: postgres
+    # Metric queries + agent_guidelines / agent_feedback (same cluster)
+    # Example: host=xxx.redshift.amazonaws.com port=5439 user=... password=... dbname=... sslmode=require
+    conn_str: ""
+
+gemini:
+  api_key: ""
+  model: "gemini-2.0-flash"
+
+slack:
+  bot_token: ""
+  signing_secret: ""
+  channel_id: ""
+
+server:
+  listen_addr: ":8080"
+
+analyze:
+  query_dir: "queries/default"
+  report_date: ""
+  workers: 4
+  max_rows_per_query: 200

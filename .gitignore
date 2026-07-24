@@ -1,0 +1,24 @@
+# Secrets & local config
+config/**/config.yaml
+.env
+.env.*
+
+# Build artifacts
+/bin/
+/dist/
+/build/
+bootstrap
+*.zip
+deploy.zip
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
