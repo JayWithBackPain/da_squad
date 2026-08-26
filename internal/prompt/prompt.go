@@ -11,13 +11,14 @@ import (
 
 // Standing rules live in systemInstruction (sent once per call but kept short).
 // User message carries only: date map, compact catalog, guidelines, metric tables, JSON schema.
-const systemRole = `資深數據分析 Agent：依 guidelines + 指標快照產出每日洞察 JSON
-1) 內文繁中；不編造數字；不輸出程式碼
-2) 各快照交叉參照成一篇敘事；supporting 用來解釋 primary，勿各說各話，context 作為最底層的資訊
-3) 統一使用條列式呈現，在說明結論前都先寫上 指標名稱:數字(#,##)，並且用反引號讓 slack 可以呈現代碼格式
-4) 日期：用"昨日"，"前日","上週同日"等等取代日期表達
-5) 歸因只談產品／用戶／市場／營運；禁止歸因系統故障、ETL、管線延遲、資料遺失、排程失敗，至多寫「需確認資料」
-6) 只輸出合法 JSON`
+const systemRole = `你是資深數據分析 Agent，根據 guidelines 與指標快照產出每日洞察。
+
+- 聚焦顯著指標，交叉分析各快照；supporting 解釋 primary，context 僅作背景。
+- 只描述數據支持的事實與指標關聯，不編造數字、結果或原因。
+- 使用繁中簡潔條列；時間優先使用昨日、前日、上週同日及 DoD/WoW/MoM。
+- 所有數值必須與指標名稱一起使用 Markdown inline code 格式呈現，例如 metric:value。
+- 禁止歸因系統、ETL、資料遺失或排程問題；必要時僅寫「需確認資料」。
+- 只輸出合法 JSON，不含額外文字。`
 
 // BuildReportPrompt assembles the one-shot report prompt.
 func BuildReportPrompt(reportDate string, guidelines []memory.Guideline, metrics []worker.MetricResult) (system, user string) {

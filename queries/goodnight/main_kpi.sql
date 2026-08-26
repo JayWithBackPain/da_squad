@@ -17,11 +17,14 @@ WITH RECURSIVE
     source_activity AS (
         SELECT dua.dt,
                COUNT(DISTINCT dua.user_id) AS dau,
+               count(distinct case when dua.matching_dim is not null then dua.user_id end) as matchers,
+               count(distinct case when dua.audience_dim is not null then dua.user_id end) as audiences,
                SUM(dua.sub_purchasing_dim.revenue) AS sub_revenue,
                SUM(dua.can_purchasing_dim.revenue) AS can_revenue
+
         FROM datamart.daily_user_activities dua
                  CROSS JOIN params p
-        WHERE dua.dt BETWEEN p.start_date AND p.report_date
+        WHERE dua.dt BETWEEN p.start_date AND p.report_date + 1
         GROUP BY dua.dt
     ),
 
@@ -38,6 +41,8 @@ WITH RECURSIVE
     daily_wide AS (
         SELECT c.dt,
                COALESCE(a.dau, 0)::decimal(18,2) AS dau,
+            coalesce(a.matchers, 0)::decimal(18,2) AS matchers,
+            coalesce(a.audiences, 0)::decimal(18,2) AS audiences,
             COALESCE(a.sub_revenue, 0)::decimal(18,2) AS sub_revenue,
             COALESCE(a.can_revenue, 0)::decimal(18,2) AS can_revenue,
             COALESCE(ad.admob_revenue, 0)::decimal(18,2) AS admob_revenue,
@@ -62,6 +67,10 @@ UNION ALL
 SELECT dt, 'total_revenue', total_revenue,
        CASE WHEN activity_data_available = 1 AND admob_data_available = 1 THEN 1 ELSE 0 END
 FROM daily_wide
+UNION ALL
+select dt, 'matchers', matchers, activity_data_available from daily_wide
+union all
+select dt, 'audiences', audiences, activity_data_available from daily_wide
     ),
 
 -- 6. 所有 Metric 共用同一套 Baseline
@@ -70,7 +79,8 @@ FROM daily_wide
                LAG(value, 1) OVER (PARTITION BY metric ORDER BY dt) AS previous_day,
                LAG(value, 7) OVER (PARTITION BY metric ORDER BY dt) AS last_week,
                ROUND(AVG(value) OVER (PARTITION BY metric ORDER BY dt ROWS BETWEEN 7 PRECEDING AND 1 PRECEDING), 2) AS previous_7d_avg,
-               ROUND(AVG(value) OVER (PARTITION BY metric ORDER BY dt ROWS BETWEEN 30 PRECEDING AND 1 PRECEDING), 2) AS previous_30d_avg
+               ROUND(AVG(value) OVER (PARTITION BY metric ORDER BY dt ROWS BETWEEN 30 PRECEDING AND 1 PRECEDING), 2) AS previous_30d_avg,
+               ROUND(STDDEV_SAMP(value) OVER (PARTITION BY metric ORDER BY dt ROWS BETWEEN 30 PRECEDING AND 1 PRECEDING), 2) AS previous_30d_stddev
         FROM daily_metrics
     ),
 
@@ -80,7 +90,8 @@ FROM daily_wide
                ROUND((value / NULLIF(previous_day, 0) - 1) * 100, 2) AS dod_pct,
                ROUND((value / NULLIF(last_week, 0) - 1) * 100, 2) AS wow_pct,
                ROUND((value / NULLIF(previous_7d_avg, 0) - 1) * 100, 2) AS vs_7d_avg_pct,
-               ROUND((value / NULLIF(previous_30d_avg, 0) - 1) * 100, 2) AS vs_30d_avg_pct
+               ROUND((value / NULLIF(previous_30d_avg, 0) - 1) * 100, 2) AS vs_30d_avg_pct,
+               ROUND((value - previous_30d_avg) / NULLIF(previous_30d_stddev, 0), 2) AS z_score_30d
         FROM metric_baselines
     )
 

@@ -176,6 +176,19 @@ DISTSTYLE ALL
 SORTKEY (is_active, category, id);
 ```
 
+#### `category` 四類的意義
+
+`category` 是**固定四類**，用來標記「這條規則在管什麼」。它會跟著規則顯示給模型（Prompt 內每條長 `- [category] rule_text`），並依 category 分群排序後才送進 Prompt（`SORTKEY` + 查詢 `ORDER BY category`）。透過 Slack 糾正自動提煉時，模型若給出非四類的值會被**強制歸為 `context`**（`internal/llm/gemini.go`）。
+
+| category | 管什麼（意義） | 影響報告的哪個面向 | 預設種子規則（migration 內建） |
+|----------|----------------|--------------------|--------------------------------|
+| `metric_logic` | 指標定義／口徑／計算邏輯 | 數字**怎麼被解讀** | 「不要把 DAU 與 MAU 混為一談；每個指標都必須標明日期區間。」 |
+| `formatting` | 報告的呈現方式 | 報告**長什麼樣** | 「全程繁中；簡潔條列，優先呈現最重要的異常。」 |
+| `context` | 對比與背景 | 要**跟什麼比、補什麼背景** | 「同時有昨日與上週對比時，必須一併比較並說明差異。」 |
+| `investigation` | 異常時的下一步寫法 | 發現異常後**怎麼描述後續** | 「標異常只描述調查方向；**不得提供 SQL／程式碼**，也不得臆造查核結果。」 |
+
+> 四類是給人維運（週審、去重、避免規則打架）用的組織維度，同時讓模型知道規則類型；它**不做加權或過濾**——凡 `is_active=TRUE` 的規則，不分類別都會進 Prompt。
+
 ### `agent_feedback`（原始日誌，預設不進 Prompt）
 
 ```sql
@@ -307,12 +320,7 @@ systemRole（程式）
   → 一次 Gemini → Slack
 ```
 
-| category | 用途 |
-|----------|------|
-| `metric_logic` | 口徑、DAU/MAU、付費定義 |
-| `formatting` | 條列、先講異常 |
-| `context` | 對比昨日／上週、活動日 |
-| `investigation` | 異常時給下一步 SQL 草案 |
+四類 category 的意義見上方 [Memory Schema 的 `category` 說明](#category-四類的意義)；下 guideline 時挑對應那類即可。注意 `investigation` 只寫**調查方向**，不寫 SQL／程式碼。
 
 規則要短、一條一事。人手維護範例：
 
