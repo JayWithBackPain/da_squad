@@ -1,6 +1,4 @@
--- @description:用戶的罐頭儲值收入
--- @role: supporting
--- @supports: can_revenue
+-- @description:日報用的主要指標+週期性對照參考
 
 SELECT DISTINCT
     date,

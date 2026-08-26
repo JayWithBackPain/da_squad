@@ -244,7 +244,32 @@ Runtime：`provided.al2023`，handler `bootstrap`，架構與 `GOARCH` 一致（
 
 ### 新增分析 SQL
 
-放入 `queries/<product>/*.sql`（檔名＝指標名）。格式與準則見 **[docs/DA_WORKER_GUIDELINE.md](docs/DA_WORKER_GUIDELINE.md)**。
+放入 `queries/<product>/*.sql`（檔名＝指標名）。完整格式與範例見 **[docs/DA_WORKER_GUIDELINE.md](docs/DA_WORKER_GUIDELINE.md)**。
+
+#### 查詢結果規範（Query result 契約）
+
+Worker 只執行 SQL、把結果轉成 markdown 表送進 Prompt。**結果的列數 × 欄數 × 每格長度，就是每天 token 成本的大宗**，所以「結果要小而聚合」不是風格問題，是成本問題：
+
+| 規範 | 做法 | 為什麼 |
+|------|------|--------|
+| **只送聚合，不送明細** | 先 `GROUP BY` / 視窗聚合；禁止把 raw event 大表丟出來 | 明細列數會讓 token 爆炸 |
+| **列數要小** | 目標個位數～數十列（單列 KPI 或近 7～30 日序列） | `analyze.max_rows_per_query` 只是**截斷安全網**（超過就砍尾），不是配額 |
+| **欄數精簡** | 只 `SELECT` 報告會用到的欄；不要 `SELECT *` | 每多一欄 = 每列都多一格 |
+| **數值先收斂** | 比率／百分位一律 `ROUND(...)`（例如 4 位）；避免 `0.123456789` 這種長浮點 | 長數字既佔 token 又難讀 |
+| **時間窗可見** | 結果列帶出 `report_date` 或 `date_from`/`date_to` | 讓模型知道時間範圍，不必猜 |
+| **欄名可讀** | 英文 `snake_case`、語意清楚：`dau`、`arppu`、`wow_delta` | 模型與人都靠欄名理解 |
+| **一檔一指標** | 一個 `.sql` 只服務一個指標／一塊摘要 | 方便報告引用、失敗隔離 |
+
+#### 指標元資料（放在 `.sql` 最上方，會進 Prompt 幫模型交叉參照）
+
+```sql
+-- @description: 付費用戶消費的人均、中位、分位
+-- @role: supporting          -- primary | supporting | context（省略＝primary）
+-- @supports: can_revenue     -- 這支服務的 primary 指標檔名（不含 .sql），逗號分隔
+SELECT ...
+```
+
+> 業務**解讀規則**（如「DAU 不要跟 MAU 混」）寫進 `agent_guidelines`，不要寫死在 SQL 註解——執行時只送查詢結果，不送檔案註解。
 
 ---
 

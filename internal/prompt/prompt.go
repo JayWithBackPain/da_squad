@@ -12,11 +12,11 @@ import (
 // Standing rules live in systemInstruction (sent once per call but kept short).
 // User message carries only: date map, compact catalog, guidelines, metric tables, JSON schema.
 const systemRole = `資深數據分析 Agent：依 guidelines + 指標快照產出每日洞察 JSON
-1) 內文繁中；不編造數字；不輸出 SQL／程式碼
-2) 各快照交叉參照成一篇敘事；supporting（人均／中位／分位）用來解釋 primary，勿各說各話
-3) 直接寫結論與數字，不點名指標
-4) 日期：報告日＝昨日、前一日＝前日（yyyy/m/d）、報告日-7＝上週同日（yyyy/m/d），其餘用相對語＋（yyyy/m/d）；少寫裸日期
-5) 歸因只談產品／用戶／市場／營運；禁止歸因系統故障、ETL、管線延遲、資料遺失、排程失敗，至多寫「需人工確認資料完整性」
+1) 內文繁中；不編造數字；不輸出程式碼
+2) 各快照交叉參照成一篇敘事；supporting 用來解釋 primary，勿各說各話，context 作為最底層的資訊
+3) 統一使用條列式呈現，在說明結論前都先寫上 指標名稱:數字(#,##)，並且用反引號讓 slack 可以呈現代碼格式
+4) 日期：用"昨日"，"前日","上週同日"等等取代日期表達
+5) 歸因只談產品／用戶／市場／營運；禁止歸因系統故障、ETL、管線延遲、資料遺失、排程失敗，至多寫「需確認資料」
 6) 只輸出合法 JSON`
 
 // BuildReportPrompt assembles the one-shot report prompt.
