@@ -1,12 +1,12 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 
 	"github.com/jay/da-agents/internal/pipeline"
 	"github.com/jay/da-agents/internal/slack"
@@ -16,6 +16,10 @@ import (
 type Handler struct {
 	SigningSecret string
 	Feedback      *pipeline.FeedbackDeps
+	// EnqueueCorrection hands a correction off for background processing so the
+	// modal can be acked within Slack's 3s window. If nil, the correction is
+	// processed in a local goroutine instead.
+	EnqueueCorrection func(ctx context.Context, job pipeline.CorrectionJob) error
 }
 
 func (h *Handler) Mux() *http.ServeMux {
@@ -102,22 +106,31 @@ func (h *Handler) HandleInteractions(w http.ResponseWriter, r *http.Request) {
 		rawText := extractCorrectionText(payload.View.State)
 		meta := map[string]string{}
 		_ = json.Unmarshal([]byte(payload.View.PrivateMetadata), &meta)
-		id, err := h.Feedback.IngestCorrection(ctx, rawText, payload.User.ID, meta["message_ts"])
-		if err != nil {
-			log.Printf("ingest correction: %v", err)
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"response_action": "errors",
-				"errors": map[string]string{
-					slack.BlockCorrection: "寫入準則失敗，請稍後再試",
-				},
-			})
-			return
+		job := pipeline.CorrectionJob{
+			RawText:   rawText,
+			UserID:    payload.User.ID,
+			MessageTS: meta["message_ts"],
+			ChannelID: meta["channel_id"],
 		}
-		channelID := meta["channel_id"]
-		if channelID != "" {
-			_ = h.Feedback.Slack.PostEphemeral(ctx, channelID, payload.User.ID,
-				"已將回饋提煉為準則 #"+strconv.Itoa(id)+"，明天分析會套用。")
+		// Distillation (Gemini + Redshift writes) is too slow for Slack's 3s modal
+		// deadline, so we hand it off and ack immediately. The user is told the
+		// result via an ephemeral message once the background job finishes.
+		if h.EnqueueCorrection != nil {
+			if err := h.EnqueueCorrection(ctx, job); err != nil {
+				log.Printf("enqueue correction: %v", err)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"response_action": "errors",
+					"errors": map[string]string{
+						slack.BlockCorrection: "暫時無法處理，請稍後再試",
+					},
+				})
+				return
+			}
+		} else {
+			// Local / fallback: no async transport, run in a goroutine with a
+			// background context so it survives after this request returns.
+			go func() { _ = h.Feedback.ProcessCorrection(context.Background(), job) }()
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"response_action":"clear"}`))

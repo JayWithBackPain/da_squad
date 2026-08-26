@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/jay/da-agents/internal/config"
@@ -151,6 +152,35 @@ func (d *FeedbackDeps) Close() {
 func (d *FeedbackDeps) RecordPositive(ctx context.Context, userID, messageTS string) error {
 	_, err := d.Memory.InsertFeedback(ctx, "positive", "", userID, messageTS, nil)
 	return err
+}
+
+// CorrectionJob carries one Slack correction to be distilled into a guideline.
+// It is processed off the request path (Lambda self-invoke in cloud, goroutine
+// locally) so the modal submission can be acked within Slack's 3s window.
+type CorrectionJob struct {
+	RawText   string `json:"raw_text"`
+	UserID    string `json:"user_id"`
+	MessageTS string `json:"message_ts"`
+	ChannelID string `json:"channel_id"`
+}
+
+// ProcessCorrection distills the correction into a guideline and notifies the
+// user via an ephemeral message. Safe to run in the background: it does not
+// depend on the HTTP request lifecycle.
+func (d *FeedbackDeps) ProcessCorrection(ctx context.Context, job CorrectionJob) error {
+	id, err := d.IngestCorrection(ctx, job.RawText, job.UserID, job.MessageTS)
+	if err != nil {
+		log.Printf("process correction: %v", err)
+		if job.ChannelID != "" {
+			_ = d.Slack.PostEphemeral(ctx, job.ChannelID, job.UserID, "提煉準則失敗，請稍後再試或改用手動新增。")
+		}
+		return err
+	}
+	if job.ChannelID != "" {
+		_ = d.Slack.PostEphemeral(ctx, job.ChannelID, job.UserID,
+			"已將回饋提煉為準則 #"+strconv.Itoa(id)+"，明天分析會套用。")
+	}
+	return nil
 }
 
 // IngestCorrection distills Slack text into a guideline and stores both rows.

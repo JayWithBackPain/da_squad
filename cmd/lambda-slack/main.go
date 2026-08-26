@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	awslambda "github.com/aws/aws-sdk-go-v2/service/lambda"
+	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/awslabs/aws-lambda-go-api-proxy/httpadapter"
 
 	"github.com/jay/da-agents/internal/config"
@@ -15,7 +19,23 @@ import (
 	appruntime "github.com/jay/da-agents/internal/runtime"
 )
 
-var adapter *httpadapter.HandlerAdapterV2
+// distillMarker tags an event as our async "process this correction" job rather
+// than an HTTP request forwarded by the Function URL / API Gateway.
+const distillMarker = "distill_correction"
+
+// asyncEvent is the payload we self-invoke with (InvocationType=Event). It embeds
+// CorrectionJob so the fields flatten into the same top-level JSON object.
+type asyncEvent struct {
+	DAJob string `json:"da_job"`
+	pipeline.CorrectionJob
+}
+
+var (
+	feedback     *pipeline.FeedbackDeps
+	adapter      *httpadapter.HandlerAdapterV2
+	lambdaClient *awslambda.Client
+	selfName     = os.Getenv("AWS_LAMBDA_FUNCTION_NAME") // set by the Lambda runtime
+)
 
 func init() {
 	log.Printf("lambda-slack init env=%s", appruntime.EnvName())
@@ -30,18 +50,59 @@ func init() {
 	if err := cfg.ValidateServer(); err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	fb, err := pipeline.OpenFeedback(cfg)
+	feedback, err = pipeline.OpenFeedback(cfg)
 	if err != nil {
 		log.Fatalf("open: %v", err)
 	}
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background())
+	if err != nil {
+		log.Fatalf("aws config: %v", err)
+	}
+	lambdaClient = awslambda.NewFromConfig(awsCfg)
+
 	h := &httpapi.Handler{
-		SigningSecret: cfg.Slack.SigningSecret,
-		Feedback:      fb,
+		SigningSecret:     cfg.Slack.SigningSecret,
+		Feedback:          feedback,
+		EnqueueCorrection: enqueueCorrection,
 	}
 	adapter = httpadapter.NewV2(h.Mux())
 }
 
-func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+// enqueueCorrection fires an async (Event) self-invoke so the modal path can ack
+// within Slack's 3s window. Requires the execution role to allow
+// lambda:InvokeFunction on this function.
+func enqueueCorrection(ctx context.Context, job pipeline.CorrectionJob) error {
+	payload, err := json.Marshal(asyncEvent{DAJob: distillMarker, CorrectionJob: job})
+	if err != nil {
+		return err
+	}
+	_, err = lambdaClient.Invoke(ctx, &awslambda.InvokeInput{
+		FunctionName:   &selfName,
+		InvocationType: lambdatypes.InvocationTypeEvent,
+		Payload:        payload,
+	})
+	return err
+}
+
+// handler dispatches on event shape: our async distill job vs an HTTP request.
+func handler(ctx context.Context, raw json.RawMessage) (any, error) {
+	var probe struct {
+		DAJob string `json:"da_job"`
+	}
+	_ = json.Unmarshal(raw, &probe)
+	if probe.DAJob == distillMarker {
+		var evt asyncEvent
+		if err := json.Unmarshal(raw, &evt); err != nil {
+			return nil, err
+		}
+		return nil, feedback.ProcessCorrection(ctx, evt.CorrectionJob)
+	}
+
+	var req events.APIGatewayV2HTTPRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, err
+	}
 	return adapter.ProxyWithContext(ctx, req)
 }
 
