@@ -181,7 +181,7 @@ Redshift agent_guidelines (is_active)  →  Report Agent (1× Gemini)  →  Slac
 
 ```bash
 # 整批（需完整 config）
-go run ./cmd/analyze -product default
+go run ./cmd/analyze -product goodnight
 ```
 
 新增檔案後無需改 Go 碼；下次 analyze／重新 `deploy.sh` 打包即可被 worker 消化。

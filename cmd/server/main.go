@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	product := flag.String("product", "default", "config product name under config/<product>/")
+	product := flag.String("product", "goodnight", "config product name under config/<product>/")
 	flag.Parse()
 
 	log.Printf("cmd/server env=%s", appruntime.EnvName())

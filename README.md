@@ -207,7 +207,7 @@ psql "$REDSHIFT_CONN_STR" -f migrations/001_agent_memory.sql
 3. 設定檔：
 
 ```bash
-cp config/default/config.example.yaml config/default/config.yaml
+cp config/goodnight/config.example.yaml config/goodnight/config.yaml
 ```
 
 環境變數可覆寫：`REDSHIFT_CONN_STR`、`GEMINI_API_KEY`、`SLACK_BOT_TOKEN`、`SLACK_SIGNING_SECRET`、`SLACK_CHANNEL_ID`、`DA_AGENT_WORKERS`。
@@ -218,10 +218,10 @@ cp config/default/config.example.yaml config/default/config.yaml
 export PATH="$HOME/sdk/go1.26.4/bin:$PATH"
 
 # 分析
-go run ./cmd/analyze -product default
+go run ./cmd/analyze -product goodnight
 
 # Slack 互動（另開 ngrok http 8080，Interactivity URL → .../slack/interactions）
-go run ./cmd/server -product default
+go run ./cmd/server -product goodnight
 ```
 
 ### 雲端
@@ -232,7 +232,7 @@ go run ./cmd/server -product default
 chmod +x deploy.sh
 export AWS_LAMBDA_ANALYZE_NAME=da-agents-analyze   # 可選：自動上傳
 export AWS_LAMBDA_SLACK_NAME=da-agents-slack
-./deploy.sh default
+./deploy.sh goodnight
 ```
 
 | Lambda | 觸發 |
@@ -322,6 +322,7 @@ docs/
   DA_WORKER_GUIDELINE.md # Worker 結果格式與 SQL 準則
   PROMPT_LAYOUT.md       # 每日 Prompt 結構
   code_review_guide.md   # Code review 盤點流程
+  WORKLOG.md             # 工作日誌與待辦（各階段完成度／啟用步驟）
 ```
 
 ## Code Review

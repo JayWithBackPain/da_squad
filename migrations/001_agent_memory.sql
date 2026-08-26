@@ -7,7 +7,7 @@
 -- - 不使用 Postgres 式 CREATE INDEX；改以 SORTKEY 輔助過濾。
 -- - Redshift 不強制外鍵；derived_guideline_id 僅為邏輯關聯。
 
-CREATE TABLE IF NOT EXISTS agent_guidelines (
+CREATE TABLE IF NOT EXISTS da_squad.agent_guidelines (
     id            INT IDENTITY(1,1) PRIMARY KEY,
     category      VARCHAR(50) NOT NULL,          -- metric_logic | formatting | context | investigation
     rule_text     VARCHAR(65535) NOT NULL,       -- Prompt 指示（祈使句）
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS agent_guidelines (
 DISTSTYLE ALL
 SORTKEY (is_active, category, id);
 
-CREATE TABLE IF NOT EXISTS agent_feedback (
+CREATE TABLE IF NOT EXISTS da_squad.agent_feedback (
     id                     INT IDENTITY(1,1) PRIMARY KEY,
     raw_text               VARCHAR(65535),       -- 糾正 Modal 原文；positive 可為空
     feedback_type          VARCHAR(20) NOT NULL, -- positive | correction

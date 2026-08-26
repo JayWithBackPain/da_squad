@@ -18,7 +18,22 @@ server:
   listen_addr: ":8080"
 
 analyze:
-  query_dir: "queries/default"
+  query_dir: "queries/goodnight"
   report_date: ""
   workers: 4
   max_rows_per_query: 200
+
+# 部署設定：deploy.sh 讀這裡（用 yq 解析），與程式執行無關
+deploy:
+  region: ""                        # 空＝用 aws cli 預設 region
+  aws_profile: ""                   # 空＝用預設 profile
+  lambda_role: ""                   # 必填：Lambda 執行角色 ARN，例 arn:aws:iam::123456789012:role/da-agents-lambda
+  architecture: arm64               # arm64 或 x86_64；腳本會自動對應成 Go 的 GOARCH
+  analyze:
+    function_name: da-agents-analyze
+    timeout: 900                    # 秒；分析可能跑久，給足
+    memory_size: 1024
+  slack:
+    function_name: da-agents-slack
+    timeout: 30                     # 秒；Slack 要 3 秒內回，別設太長
+    memory_size: 512

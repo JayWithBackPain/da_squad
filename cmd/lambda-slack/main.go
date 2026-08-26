@@ -21,7 +21,7 @@ func init() {
 	log.Printf("lambda-slack init env=%s", appruntime.EnvName())
 	product := os.Getenv("DA_AGENT_PRODUCT")
 	if product == "" {
-		product = "default"
+		product = "goodnight"
 	}
 	cfg, err := config.Load(product)
 	if err != nil {

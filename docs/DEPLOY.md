@@ -5,7 +5,7 @@
 ## 產出物
 
 ```bash
-./deploy.sh [product]          # product 預設 default
+./deploy.sh [product]          # product 預設 goodnight
 ```
 
 會在 `dist/` 產生：
@@ -48,11 +48,11 @@
 ### 1. 打包
 
 ```bash
-cp config/default/config.example.yaml config/default/config.yaml
+cp config/goodnight/config.example.yaml config/goodnight/config.yaml
 # 可只放非敏感預設；連線字串建議之後用 Lambda env
 
 chmod +x deploy.sh
-./deploy.sh default
+./deploy.sh goodnight
 ```
 
 ### 2. 建立 Lambda（若尚未建立）
@@ -94,7 +94,7 @@ https://<function-url-or-apigw>/slack/interactions
 export AWS_LAMBDA_ANALYZE_NAME=da-agents-analyze
 export AWS_LAMBDA_SLACK_NAME=da-agents-slack
 # 可選：AWS_PROFILE / AWS_REGION
-./deploy.sh default
+./deploy.sh goodnight
 ```
 
 未設定上述兩個名稱時，腳本只打包，不呼叫 AWS。
@@ -108,7 +108,7 @@ export AWS_LAMBDA_SLACK_NAME=da-agents-slack
 # 2. 重新打包（+ 可選自動更新 Lambda）
 export AWS_LAMBDA_ANALYZE_NAME=da-agents-analyze
 export AWS_LAMBDA_SLACK_NAME=da-agents-slack
-./deploy.sh default
+./deploy.sh goodnight
 ```
 
 | 你改了什麼 | 要不要重部署 | 備註 |
@@ -123,7 +123,7 @@ export AWS_LAMBDA_SLACK_NAME=da-agents-slack
 ### 手動更新（不用腳本上傳時）
 
 ```bash
-./deploy.sh default
+./deploy.sh goodnight
 
 aws lambda update-function-code \
   --function-name da-agents-analyze \

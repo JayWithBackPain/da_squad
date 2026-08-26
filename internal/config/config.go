@@ -54,7 +54,7 @@ type AnalyzeConfig struct {
 // Load reads config/<product>/config.yaml relative to runtime.RootDir.
 func Load(product string) (*Config, error) {
 	if product == "" {
-		product = "default"
+		product = "goodnight"
 	}
 	path, err := appruntime.Resolve("config", product, "config.yaml")
 	if err != nil {
@@ -113,7 +113,7 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Analyze.MaxRowsPerQuery = 200
 	}
 	if cfg.Analyze.QueryDir == "" {
-		cfg.Analyze.QueryDir = "queries/default"
+		cfg.Analyze.QueryDir = "queries/goodnight"
 	}
 }
 

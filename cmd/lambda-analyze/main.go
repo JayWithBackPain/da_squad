@@ -16,7 +16,7 @@ func handler(ctx context.Context, _ map[string]any) error {
 	log.Printf("lambda-analyze env=%s", appruntime.EnvName())
 	product := os.Getenv("DA_AGENT_PRODUCT")
 	if product == "" {
-		product = "default"
+		product = "goodnight"
 	}
 	cfg, err := config.Load(product)
 	if err != nil {
