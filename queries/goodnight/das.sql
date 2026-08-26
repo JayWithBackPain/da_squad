@@ -20,8 +20,8 @@ WITH RECURSIVE
         SELECT date_trunc('day',start_time) as dt,
                COUNT(DISTINCT case when is_video then s.user_id end) AS video_streamers,
                COUNT(DISTINCT case when not is_video then s.user_id end) AS voice_streamers,
-               sum(case when is_video then duration else 0 end) AS video_duration,
-               sum(case when not is_video then duration else 0 end) AS voice_duration
+               round(sum(case when is_video then duration else 0 end)::decimal(18,2)/3600,2) AS video_duration,
+               round(sum(case when not is_video then duration else 0 end)::decimal(18,2)/3600,2) AS voice_duration
         FROM fact.streaming s
                  CROSS JOIN params p
         WHERE s.start_time BETWEEN p.start_date AND p.report_date + 1

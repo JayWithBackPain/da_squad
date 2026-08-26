@@ -37,11 +37,11 @@ WITH RECURSIVE
 -- Wide → Long
     daily_metrics AS (
         SELECT dt, region, 'dau/rolling_wau' AS metric,
-               dau::decimal(18,4) / NULLIF(rolling_7d_wau, 0) AS value
+               round(dau::decimal(18,4) / NULLIF(rolling_7d_wau, 0),2) AS value
 FROM daily_wide
 UNION ALL
 SELECT dt, region, 'dau/rolling_mau',
-       dau::decimal(18,4) / NULLIF(rolling_30d_mau, 0)
+       round(dau::decimal(18,4) / NULLIF(rolling_30d_mau, 0),2)
 FROM daily_wide
 UNION ALL
 SELECT dt, region, 'rolling_7d_wau', rolling_7d_wau::decimal(18,4)
