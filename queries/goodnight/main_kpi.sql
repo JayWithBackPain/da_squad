@@ -17,6 +17,7 @@ WITH RECURSIVE
     source_activity AS (
         SELECT dua.dt,
                COUNT(DISTINCT dua.user_id) AS dau,
+               count(distinct case when can_purchasing_dim is not null or sub_purchasing_dim is not null then dua.user_id end) as payers,
                count(distinct case when dua.matching_dim is not null then dua.user_id end) as matchers,
                count(distinct case when dua.audience_dim is not null then dua.user_id end) as audiences,
                SUM(dua.sub_purchasing_dim.revenue) AS sub_revenue,
@@ -41,6 +42,7 @@ WITH RECURSIVE
     daily_wide AS (
         SELECT c.dt,
                COALESCE(a.dau, 0)::decimal(18,2) AS dau,
+            coalesce(a.payers,0)::decimal(18,2) as payers,
             coalesce(a.matchers, 0)::decimal(18,2) AS matchers,
             coalesce(a.audiences, 0)::decimal(18,2) AS audiences,
             COALESCE(a.sub_revenue, 0)::decimal(18,2) AS sub_revenue,
@@ -58,6 +60,8 @@ WITH RECURSIVE
     daily_metrics AS (
         SELECT dt, 'dau' AS metric, dau AS value, activity_data_available AS data_available FROM daily_wide
 UNION ALL
+SELECT dt, 'payers' AS metric, payers AS value, activity_data_available AS data_available FROM daily_wide
+union all
 SELECT dt, 'sub_revenue', sub_revenue, activity_data_available FROM daily_wide
 UNION ALL
 SELECT dt, 'can_revenue', can_revenue, activity_data_available FROM daily_wide

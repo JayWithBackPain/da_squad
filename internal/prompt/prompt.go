@@ -79,6 +79,7 @@ func BuildReportPrompt(reportDate string, guidelines []memory.Guideline, metrics
 
 	b.WriteString(`json:
 {"summary":"…","insights":["…"],"anomalies":[{"metric":"業務指標名","detail":"…","investigation_sql":""}],"failed_metrics":[]}
+只輸出單一 JSON 物件，不要包成陣列。
 investigation_sql 必須為 ""。
 `)
 	user = b.String()

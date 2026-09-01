@@ -19,21 +19,55 @@ type Client struct {
 }
 
 type ReportOutput struct {
-	Summary       string         `json:"summary"`
-	Insights      []string       `json:"insights"`
-	Anomalies     []Anomaly      `json:"anomalies"`
-	FailedMetrics []string       `json:"failed_metrics"`
+	Summary       string    `json:"summary"`
+	Insights      []string  `json:"insights"`
+	Anomalies     []Anomaly `json:"anomalies"`
+	FailedMetrics []string  `json:"failed_metrics"`
 }
 
 type Anomaly struct {
-	Metric            string `json:"metric"`
-	Detail            string `json:"detail"`
-	InvestigationSQL  string `json:"investigation_sql"`
+	Metric           string `json:"metric"`
+	Detail           string `json:"detail"`
+	InvestigationSQL string `json:"investigation_sql"`
 }
 
 type GuidelineDraft struct {
 	Category string `json:"category"`
 	RuleText string `json:"rule_text"`
+}
+
+// reportResponseSchema forces Gemini to return a single ReportOutput object
+// (not an array). Uses the OpenAPI subset accepted by generateContent.
+var reportResponseSchema = map[string]any{
+	"type": "OBJECT",
+	"properties": map[string]any{
+		"summary":  map[string]any{"type": "STRING"},
+		"insights": map[string]any{"type": "ARRAY", "items": map[string]any{"type": "STRING"}},
+		"anomalies": map[string]any{
+			"type": "ARRAY",
+			"items": map[string]any{
+				"type": "OBJECT",
+				"properties": map[string]any{
+					"metric":            map[string]any{"type": "STRING"},
+					"detail":            map[string]any{"type": "STRING"},
+					"investigation_sql": map[string]any{"type": "STRING"},
+				},
+				"required": []string{"metric", "detail"},
+			},
+		},
+		"failed_metrics": map[string]any{"type": "ARRAY", "items": map[string]any{"type": "STRING"}},
+	},
+	"required": []string{"summary", "insights", "anomalies", "failed_metrics"},
+}
+
+// guidelineResponseSchema forces DistillGuideline output into a single object.
+var guidelineResponseSchema = map[string]any{
+	"type": "OBJECT",
+	"properties": map[string]any{
+		"category":  map[string]any{"type": "STRING", "enum": []string{"metric_logic", "formatting", "context", "investigation"}},
+		"rule_text": map[string]any{"type": "STRING"},
+	},
+	"required": []string{"category", "rule_text"},
 }
 
 func New(apiKey, model string) *Client {
@@ -49,11 +83,20 @@ func New(apiKey, model string) *Client {
 	}
 }
 
-func (c *Client) GenerateJSON(ctx context.Context, system, user string) (string, error) {
+// GenerateJSON calls generateContent with JSON mime type. When responseSchema
+// is non-nil it is sent so the model is constrained to that exact shape.
+func (c *Client) GenerateJSON(ctx context.Context, system, user string, responseSchema any) (string, error) {
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		c.Model, c.APIKey,
 	)
+	genConfig := map[string]any{
+		"temperature":      0.2,
+		"responseMimeType": "application/json",
+	}
+	if responseSchema != nil {
+		genConfig["responseSchema"] = responseSchema
+	}
 	body := map[string]any{
 		"systemInstruction": map[string]any{
 			"parts": []map[string]string{{"text": system}},
@@ -64,10 +107,7 @@ func (c *Client) GenerateJSON(ctx context.Context, system, user string) (string,
 				"parts": []map[string]string{{"text": user}},
 			},
 		},
-		"generationConfig": map[string]any{
-			"temperature":      0.2,
-			"responseMimeType": "application/json",
-		},
+		"generationConfig": genConfig,
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -117,19 +157,24 @@ func (c *Client) GenerateJSON(ctx context.Context, system, user string) (string,
 }
 
 func (c *Client) GenerateReport(ctx context.Context, system, user string) (*ReportOutput, error) {
-	text, err := c.GenerateJSON(ctx, system, user)
+	text, err := c.GenerateJSON(ctx, system, user, reportResponseSchema)
 	if err != nil {
 		return nil, err
 	}
 	var out ReportOutput
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
-		return nil, fmt.Errorf("parse report json: %w; body=%s", err, truncate(text, 300))
+	if err := json.Unmarshal([]byte(text), &out); err == nil {
+		return &out, nil
 	}
-	return &out, nil
+	// Tolerate the model wrapping the single report in an array [ {...} ].
+	var arr []ReportOutput
+	if err := json.Unmarshal([]byte(text), &arr); err == nil && len(arr) > 0 {
+		return &arr[0], nil
+	}
+	return nil, fmt.Errorf("parse report json: unexpected structure; body=%s", truncate(text, 300))
 }
 
 func (c *Client) DistillGuideline(ctx context.Context, system, user string) (*GuidelineDraft, error) {
-	text, err := c.GenerateJSON(ctx, system, user)
+	text, err := c.GenerateJSON(ctx, system, user, guidelineResponseSchema)
 	if err != nil {
 		return nil, err
 	}
