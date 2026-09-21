@@ -27,11 +27,22 @@ WITH RECURSIVE
 -- =========================================================
 -- 2. Daily Active Base
 -- =========================================================
+    ext_revenue as (
+        select
+            date_trunc('day',datecreated) as dt,
+            userid,
+            sum(amountdollars) as rev
+        from store_transaction
+        where datecreated >= (select start_date from params)
+          and status in ('AUTHORIZED','COMPLETED')
+          and amountdollars > 0
+        group by 1,2
+    ),
     activity_base AS (
         SELECT
             da.day::date AS dt,
             da.userid,
-            da.revenue,
+            er.rev as revenue,
             da.bars_spent,
             CASE WHEN ud.country = 'US' THEN 'na'
                  WHEN ud.locale IN ('en','es','me') THEN ud.locale
@@ -40,8 +51,9 @@ WITH RECURSIVE
                      THEN DATE_TRUNC('month',da.day)::date
     ELSE (DATE_TRUNC('month',da.day) + INTERVAL '15 days')::date END AS tier_start_dt
     FROM dailyactives da
-    CROSS JOIN params p
-    LEFT JOIN users_data ud ON da.userid = ud.userid
+        CROSS JOIN params p
+        LEFT JOIN users_data ud ON da.userid = ud.userid
+        left join ext_revenue er on da.userid = er.userid
     WHERE da.day BETWEEN p.start_date AND p.report_date
 ),
 

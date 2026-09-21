@@ -29,11 +29,22 @@ WITH RECURSIVE
         SELECT
             da.day::date AS dt,
             da.userid,
-            da.revenue,
-            da.bars_spent
+            sum(bars_spent) as bars_spent
         FROM dailyactives da
                  CROSS JOIN params p
         WHERE da.day BETWEEN p.start_date AND p.report_date
+        group by 1,2
+    ),
+    ext_revenue as (
+        select
+            date_trunc('day',datecreated) as dt,
+            count(distinct userid) as payers,
+            sum(amountdollars) as rev
+        from store_transaction
+        where datecreated >= (select start_date from params)
+          and status in ('AUTHORIZED','COMPLETED')
+          and amountdollars > 0
+        group by 1
     ),
 
 -- =========================================================
@@ -43,9 +54,7 @@ WITH RECURSIVE
         SELECT
             dt,
             COUNT(DISTINCT userid) AS dau,
-            COUNT(DISTINCT CASE WHEN revenue > 0 THEN userid END) AS payers,
-            COUNT(DISTINCT CASE WHEN bars_spent > 0 THEN userid END) AS spenders,
-            SUM(revenue) AS rev
+            COUNT(DISTINCT CASE WHEN bars_spent > 0 THEN userid END) AS spenders
         FROM base
         GROUP BY 1
     ),
@@ -61,13 +70,13 @@ WITH RECURSIVE
         SELECT
             c.dt,
             COALESCE(a.dau,0)::integer AS dau,
-            COALESCE(a.payers,0)::integer AS payers,
+            COALESCE(er.payers,0)::integer AS payers,
             COALESCE(a.spenders,0)::integer AS spenders,
-            COALESCE(a.rev,0)::decimal(38,2) AS rev,
+            COALESCE(er.rev,0)::decimal(38,2) AS rev,
             CASE WHEN a.dt IS NOT NULL THEN 1 ELSE 0 END AS activity_data_available
         FROM calendar c
-                 LEFT JOIN source_activity a
-                           ON c.dt = a.dt
+                 LEFT JOIN source_activity a ON c.dt = a.dt
+                 left join ext_revenue er on c.dt = er.dt
     ),
 
 -- =========================================================
