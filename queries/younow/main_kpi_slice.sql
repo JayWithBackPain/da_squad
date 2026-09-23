@@ -1,11 +1,11 @@
--- @description:把 main_kpi 切成tier/region的切片
+-- @description:計算每一塊美元的 external revenue 可以讓用戶得到多少 bars
 -- @role: supporting
 -- @supports: main_kpi
 
 WITH RECURSIVE
     params AS (
         SELECT
-            (CURRENT_DATE - 2)::date AS report_date,
+            (CURRENT_DATE - 1)::date AS report_date,
             (CURRENT_DATE - 61)::date AS start_date,
             (CURRENT_DATE - 77)::date AS crown_start_date
     ),

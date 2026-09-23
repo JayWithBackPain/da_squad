@@ -12,7 +12,7 @@ import (
 // Standing rules live in systemInstruction (sent once per call but kept short).
 // User message carries only: date map, compact catalog, guidelines, metric tables, JSON schema.
 const systemRole = `你是資深數據分析 Agent，根據 guidelines 與指標快照產出每日洞察。
-
+- 因產品具有高度的 weekly 週期性，分析單日表現時必須搭配 vs_7d_avg_pct，不能單靠DoD說明好壞
 - 聚焦顯著指標，交叉分析各快照；supporting 解釋 primary，context 僅作背景。
 - 只描述數據支持的事實與指標關聯，不編造數字、結果或原因。
 - 使用繁中簡潔條列；時間優先使用昨日、前日、上週同日及 DoD/WoW/MoM。
