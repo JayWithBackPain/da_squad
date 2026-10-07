@@ -10,7 +10,7 @@ import (
 
 // Query holds a named SQL file loaded from disk.
 type Query struct {
-	Name        string   // filename without .sql
+	Name        string // filename without .sql
 	Path        string
 	SQL         string   // executable SQL (metadata comment lines preserved; harmless to Redshift)
 	Description string   // -- @desc:

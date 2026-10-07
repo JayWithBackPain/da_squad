@@ -1,8 +1,8 @@
 WITH RECURSIVE
     params AS (
         SELECT
-            (CURRENT_DATE - 1)::date AS report_date,
-            (CURRENT_DATE - 61)::date AS start_date
+            ({{run_date}} - 1)::date AS report_date,
+            ({{run_date}} - 61)::date AS start_date
     ),
 
 -- =========================================================
@@ -15,6 +15,7 @@ WITH RECURSIVE
 
         SELECT (c.dt + 1)::date
         FROM calendar c
+
                  CROSS JOIN params p
         WHERE c.dt < p.report_date
     ),

@@ -7,9 +7,9 @@ WITH
        ============================================================ */
     params AS (
         SELECT
-            (CURRENT_DATE - 1)::date AS report_date,
-            (CURRENT_DATE - 61)::date AS start_date,
-            (CURRENT_DATE - 77)::date AS crown_start_date
+            ({{run_date}} - 1)::date AS report_date,
+            ({{run_date}} - 61)::date AS start_date,
+            ({{run_date}} - 77)::date AS crown_start_date
     ),
 
     /* ============================================================

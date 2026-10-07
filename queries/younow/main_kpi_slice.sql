@@ -5,9 +5,9 @@
 WITH RECURSIVE
     params AS (
         SELECT
-            (CURRENT_DATE - 1)::date AS report_date,
-            (CURRENT_DATE - 61)::date AS start_date,
-            (CURRENT_DATE - 77)::date AS crown_start_date
+            ({{run_date}} - 1)::date AS report_date,
+            ({{run_date}} - 61)::date AS start_date,
+            ({{run_date}} - 77)::date AS crown_start_date
     ),
 
 -- =========================================================
@@ -34,6 +34,7 @@ WITH RECURSIVE
             sum(amountdollars) as rev
         from store_transaction
         where datecreated >= (select start_date from params)
+          and datecreated < (select report_date + 1 from params)
           and status in ('AUTHORIZED','COMPLETED')
           and amountdollars > 0
         group by 1,2
@@ -53,7 +54,7 @@ WITH RECURSIVE
     FROM dailyactives da
         CROSS JOIN params p
         LEFT JOIN users_data ud ON da.userid = ud.userid
-        left join ext_revenue er on da.userid = er.userid
+        left join ext_revenue er on da.userid = er.userid AND da.day::date = er.dt::date
     WHERE da.day BETWEEN p.start_date AND p.report_date
 ),
 

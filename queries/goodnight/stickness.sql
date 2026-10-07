@@ -4,7 +4,7 @@
 
 WITH RECURSIVE
     params AS (
-        SELECT (CURRENT_DATE - 1)::date AS report_date
+        SELECT ({{run_date}} - 1)::date AS report_date
     ),
 
 -- 計算 report date + 前 30 天 metric

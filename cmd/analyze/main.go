@@ -15,13 +15,17 @@ import (
 )
 
 func main() {
-	product := flag.String("product", "younow", "config product name under config/<product>/")
+	product := flag.String("product", "goodnight", "config product name under config/<product>/")
+	date := flag.String("date", "", "report business date YYYY-MM-DD; SQL uses this date")
 	flag.Parse()
 
 	log.Printf("cmd/analyze env=%s", appruntime.EnvName())
 	cfg, err := config.Load(*product)
 	if err != nil {
 		log.Fatalf("config: %v", err)
+	}
+	if *date != "" {
+		cfg.Analyze.ReportDate = *date
 	}
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("config: %v", err)

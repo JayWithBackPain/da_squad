@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	ActionPositive   = "feedback_positive"
-	ActionCorrection = "feedback_correction"
-	CallbackCorrect  = "correction_modal"
-	BlockCorrection  = "correction_input_block"
+	ActionReplayNext      = "replay_next"
+	ActionPositive        = "feedback_positive"
+	ActionCorrection      = "feedback_correction"
+	CallbackCorrect       = "correction_modal"
+	BlockCorrection       = "correction_input_block"
 	ActionCorrectionInput = "correction_text"
 )
 
@@ -47,17 +48,20 @@ type PostResult struct {
 	TS      string
 }
 
-func (c *Client) PostReport(ctx context.Context, reportDate string, rep *llm.ReportOutput) (*PostResult, error) {
-	blocks := BuildReportBlocks(reportDate, rep)
+func (c *Client) PostReport(ctx context.Context, reportDate string, rep *llm.ReportOutput, runID string, replay ...bool) (*PostResult, error) {
+	blocks := BuildReportBlocks(reportDate, rep, runID)
+	if len(replay) > 0 && replay[0] {
+		blocks = append(blocks, map[string]any{"type": "actions", "elements": []map[string]any{{"type": "button", "action_id": ActionReplayNext, "value": runID, "text": map[string]string{"type": "plain_text", "text": "審查完成，下一天"}}}})
+	}
 	payload := map[string]any{
 		"channel": c.ChannelID,
 		"text":    fmt.Sprintf("Daily data report %s", reportDate),
 		"blocks":  blocks,
 	}
 	var resp struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
-		TS    string `json:"ts"`
+		OK      bool   `json:"ok"`
+		Error   string `json:"error"`
+		TS      string `json:"ts"`
 		Channel string `json:"channel"`
 	}
 	if err := c.api(ctx, "chat.postMessage", payload, &resp); err != nil {
@@ -69,15 +73,16 @@ func (c *Client) PostReport(ctx context.Context, reportDate string, rep *llm.Rep
 	return &PostResult{Channel: resp.Channel, TS: resp.TS}, nil
 }
 
-func (c *Client) OpenCorrectionModal(ctx context.Context, triggerID, channelID, messageTS string) error {
+func (c *Client) OpenCorrectionModal(ctx context.Context, triggerID, channelID, messageTS, runID string) error {
 	view := map[string]any{
-		"type": "modal",
+		"type":        "modal",
 		"callback_id": CallbackCorrect,
 		"private_metadata": mustJSON(map[string]string{
 			"channel_id": channelID,
 			"message_ts": messageTS,
+			"run_id":     runID,
 		}),
-		"title": map[string]string{"type": "plain_text", "text": "糾正 / 補充規則"},
+		"title":  map[string]string{"type": "plain_text", "text": "糾正 / 補充規則"},
 		"submit": map[string]string{"type": "plain_text", "text": "送出"},
 		"close":  map[string]string{"type": "plain_text", "text": "取消"},
 		"blocks": []map[string]any{
@@ -160,7 +165,7 @@ func (c *Client) api(ctx context.Context, method string, payload any, out any) e
 }
 
 // BuildReportBlocks builds Block Kit for the daily report.
-func BuildReportBlocks(reportDate string, rep *llm.ReportOutput) []map[string]any {
+func BuildReportBlocks(reportDate string, rep *llm.ReportOutput, runID string) []map[string]any {
 	var insights strings.Builder
 	for _, i := range rep.Insights {
 		insights.WriteString("• ")
@@ -177,7 +182,10 @@ func BuildReportBlocks(reportDate string, rep *llm.ReportOutput) []map[string]an
 	} else {
 		for _, a := range rep.Anomalies {
 			anomalies.WriteString(fmt.Sprintf("• *%s*: %s\n", a.Metric, a.Detail))
-			// Do not render investigation_sql; next steps stay in detail text only.
+			for _, step := range a.InvestigationPlan {
+				anomalies.WriteString("    調查：" + step + "\n")
+			}
+			// Evidence IDs and legacy SQL fields are not exposed in the report.
 		}
 	}
 
@@ -214,16 +222,18 @@ func BuildReportBlocks(reportDate string, rep *llm.ReportOutput) []map[string]an
 			"type": "actions",
 			"elements": []map[string]any{
 				{
-					"type": "button",
-					"text": map[string]string{"type": "plain_text", "text": "準確"},
-					"style": "primary",
+					"type":      "button",
+					"text":      map[string]string{"type": "plain_text", "text": "準確"},
+					"style":     "primary",
 					"action_id": ActionPositive,
+					"value":     runID,
 				},
 				{
-					"type": "button",
-					"text": map[string]string{"type": "plain_text", "text": "糾正 / 補充規則"},
-					"style": "danger",
+					"type":      "button",
+					"text":      map[string]string{"type": "plain_text", "text": "糾正 / 補充規則"},
+					"style":     "danger",
 					"action_id": ActionCorrection,
+					"value":     runID,
 				},
 			},
 		},

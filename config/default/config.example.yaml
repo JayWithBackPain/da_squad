@@ -1,7 +1,7 @@
 database:
   redshift:
     driver: postgres
-    # Metric queries + agent_guidelines / agent_feedback (same cluster)
+    # Metric queries + da_squad.agent_guidelines / analysis_runs / feedback (same cluster)
     # Example: host=xxx.redshift.amazonaws.com port=5439 user=... password=... dbname=... sslmode=require
     conn_str: ""
 
@@ -22,6 +22,13 @@ analyze:
   report_date: ""
   workers: 4
   max_rows_per_query: 200
+  timezone: Asia/Taipei
+  # Empty selects knowledge/<product>/catalog.yaml; "-" disables YAML knowledge.
+  knowledge_path: ""
+  max_input_tokens: 12000
+  max_input_bytes: 60000
+  max_knowledge_bytes: 8000
+  max_knowledge_items: 12
 
 # 部署設定：deploy.sh 讀這裡（用 yq 解析），與程式執行無關
 deploy:
@@ -35,5 +42,5 @@ deploy:
     memory_size: 1024
   slack:
     function_name: da-agents-slack
-    timeout: 30                     # 秒；Slack 要 3 秒內回，別設太長
+    timeout: 900                    # 背景回放分析；HTTP handler 仍在 3 秒內 ack
     memory_size: 512

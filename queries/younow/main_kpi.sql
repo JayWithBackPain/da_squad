@@ -3,9 +3,9 @@
 WITH RECURSIVE
     params AS (
         SELECT
-            (CURRENT_DATE - 1)::date AS report_date,
-            (CURRENT_DATE - 61)::date AS start_date,
-            (CURRENT_DATE - 77)::date AS crown_start_date
+            ({{run_date}} - 1)::date AS report_date,
+            ({{run_date}} - 61)::date AS start_date,
+            ({{run_date}} - 77)::date AS crown_start_date
     ),
 
 -- =========================================================
@@ -42,6 +42,7 @@ WITH RECURSIVE
             sum(amountdollars) as rev
         from store_transaction
         where datecreated >= (select start_date from params)
+          and datecreated < (select report_date + 1 from params)
           and status in ('AUTHORIZED','COMPLETED')
           and amountdollars > 0
         group by 1

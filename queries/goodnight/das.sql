@@ -4,15 +4,15 @@
 
 WITH RECURSIVE
     params AS (
-        SELECT (CURRENT_DATE - 1)::date AS report_date,
-            (CURRENT_DATE - 60)::date AS start_date
+        SELECT ({{run_date}} - 1)::date AS report_date,
+            ({{run_date}} - 60)::date AS start_date
     ),
 
 -- 1. 建立連續日期，確保 LAG(7) 永遠代表 7 天前
     calendar(dt) AS (
         SELECT start_date FROM params
         UNION ALL
-        SELECT (c.dt + INTERVAL '1 day')::date FROM calendar c CROSS JOIN params p WHERE c.dt <= p.report_date
+        SELECT (c.dt + INTERVAL '1 day')::date FROM calendar c CROSS JOIN params p WHERE c.dt < p.report_date
     ),
 
     -- 2. Activity Source：所有來自 daily_user_activities 的基礎指標
@@ -24,7 +24,7 @@ WITH RECURSIVE
                round(sum(case when not is_video then duration else 0 end)::decimal(18,2)/3600,2) AS voice_duration
         FROM fact.streaming s
                  CROSS JOIN params p
-        WHERE s.start_time BETWEEN p.start_date AND p.report_date + 1
+        WHERE s.start_time >= p.start_date AND s.start_time < p.report_date + 1
         GROUP BY dt
     ),
 

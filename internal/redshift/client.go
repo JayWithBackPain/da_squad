@@ -56,32 +56,43 @@ func (c *Client) QueryRows(ctx context.Context, query string, maxRows int) (colu
 	}
 	defer r.Close()
 
+	return readRows(r, maxRows)
+}
+
+// resultRows allows the same row-limit logic to be checked without a live DB.
+type resultRows interface {
+	Columns() ([]string, error)
+	Next() bool
+	Scan(...any) error
+	Err() error
+}
+
+func readRows(r resultRows, maxRows int) (columns []string, rows []map[string]string, err error) {
 	cols, err := r.Columns()
 	if err != nil {
 		return nil, nil, fmt.Errorf("columns: %w", err)
 	}
 	columns = cols
-
 	for r.Next() {
 		if len(rows) >= maxRows {
-			break
+			return columns, nil, fmt.Errorf("query result exceeds max_rows_per_query=%d; reduce SQL aggregation", maxRows)
 		}
 		raw := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
 		for i := range raw {
 			ptrs[i] = &raw[i]
 		}
-		if err := r.Scan(ptrs...); err != nil {
-			return columns, rows, fmt.Errorf("scan: %w", err)
+		if err = r.Scan(ptrs...); err != nil {
+			return columns, nil, fmt.Errorf("scan: %w", err)
 		}
-		m := make(map[string]string, len(cols))
+		row := make(map[string]string, len(cols))
 		for i, col := range cols {
-			m[col] = stringify(raw[i])
+			row[col] = stringify(raw[i])
 		}
-		rows = append(rows, m)
+		rows = append(rows, row)
 	}
-	if err := r.Err(); err != nil {
-		return columns, rows, err
+	if err = r.Err(); err != nil {
+		return columns, nil, err
 	}
 	return columns, rows, nil
 }

@@ -19,8 +19,8 @@ FROM (
     count(distinct ch_id)                 AS transactions,
     sum(usd_price)                        AS revenue
     FROM fact.can_purchase
-    WHERE purchased_at >= CURRENT_DATE - 30
-    and purchased_at < CURRENT_DATE
+    WHERE purchased_at >= {{run_date}} - 30
+    and purchased_at < {{run_date}}
     GROUP BY 1, 2
     HAVING sum(usd_price) > 0
     ) mysource

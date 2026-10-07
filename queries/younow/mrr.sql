@@ -5,9 +5,9 @@
 WITH RECURSIVE
     params AS (
         SELECT
-                    CURRENT_DATE-1 AS end_date,
-            (CURRENT_DATE - 8)::date AS start_date,
-            (CURRENT_DATE - 68)::date AS raw_start_date
+                    {{run_date}}-1 AS end_date,
+            ({{run_date}} - 8)::date AS start_date,
+            ({{run_date}} - 68)::date AS raw_start_date
     ),
 
 -- =========================================================
@@ -33,7 +33,7 @@ WITH RECURSIVE
             0::decimal(18,2) AS ext_revenue
         FROM dailyactives da
                  CROSS JOIN params p
-        WHERE da.day >= p.raw_start_date
+        WHERE da.day >= p.raw_start_date AND da.day < p.end_date + 1
         GROUP BY 1,2
     ),
 

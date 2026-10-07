@@ -3,11 +3,11 @@
 -- @supports: main_kpi
 WITH RECURSIVE calendar(dt) AS (
     -- [優化 1] 只產出最近 7 天的時間軸
-    SELECT (CURRENT_DATE - 7)::date
+    SELECT ({{run_date}} - 7)::date
     UNION ALL
     SELECT (dt + INTERVAL '1 day')::date
     FROM calendar
-    WHERE dt < CURRENT_DATE
+    WHERE dt < {{run_date}} - 1
 ),
 
 -- [優化 2] 精準底表裁切：近 7 天日曆 - 60 天滾動 = 只需要 67 天前的資料
@@ -21,6 +21,7 @@ WITH RECURSIVE calendar(dt) AS (
                        COALESCE(sub_purchasing_dim.revenue, 0) AS sub_revenue
                    FROM datamart.daily_user_activities
                    WHERE dt >= (select min(dt)-'60 days'::interval from calendar)
+                     AND dt < {{run_date}}
                ),
 
 -- =========================================================
@@ -49,7 +50,7 @@ WITH RECURSIVE calendar(dt) AS (
                            END AS traffic_state
                    FROM traffic_events
                    -- [優化 3] 提早過濾：只保留近 7 天的上線紀錄
-                   WHERE dt >= CURRENT_DATE - 7
+                   WHERE dt >= {{run_date}} - 7
 
                    UNION ALL
 
@@ -61,7 +62,7 @@ WITH RECURSIVE calendar(dt) AS (
                    FROM traffic_events
                    WHERE (next_active_dt IS NULL OR next_active_dt > dt + 8)
                      -- [優化 3] 提早過濾：只允許投射結果落在近 7 天內
-                     AND (dt + INTERVAL '8 days')::date BETWEEN CURRENT_DATE - 7 AND CURRENT_DATE
+                     AND (dt + INTERVAL '8 days')::date BETWEEN {{run_date}} - 7 AND {{run_date}} - 1
 
 UNION ALL
 
@@ -73,7 +74,7 @@ SELECT
 FROM traffic_events
 WHERE (next_active_dt IS NULL OR next_active_dt > dt + 30)
   -- [優化 3] 提早過濾：只允許投射結果落在近 7 天內
-  AND (dt + INTERVAL '30 days')::date BETWEEN CURRENT_DATE - 7 AND CURRENT_DATE
+  AND (dt + INTERVAL '30 days')::date BETWEEN {{run_date}} - 7 AND {{run_date}} - 1
                ),
                traffic_agg AS (
 SELECT

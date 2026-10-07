@@ -32,7 +32,7 @@ DISTSTYLE ALL
 SORTKEY (feedback_type, created_at, id);
 
 -- 僅在表為空時寫入預設準則
-INSERT INTO agent_guidelines (category, rule_text, is_active, source)
+INSERT INTO da_squad.agent_guidelines (category, rule_text, is_active, source)
 SELECT v.category, v.rule_text, TRUE, 'manual'
 FROM (
     SELECT 'formatting' AS category,
@@ -47,4 +47,4 @@ FROM (
     SELECT 'investigation',
            '標示異常時，只用繁體中文描述建議調查方向（例如切分維度、核對資料源）；不要提供任何 SQL 或程式碼範例，也不要臆造查核結果。'
 ) v
-WHERE NOT EXISTS (SELECT 1 FROM agent_guidelines LIMIT 1);
+WHERE NOT EXISTS (SELECT 1 FROM da_squad.agent_guidelines LIMIT 1);

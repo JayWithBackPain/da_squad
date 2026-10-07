@@ -26,9 +26,19 @@ type ReportOutput struct {
 }
 
 type Anomaly struct {
-	Metric           string `json:"metric"`
-	Detail           string `json:"detail"`
-	InvestigationSQL string `json:"investigation_sql"`
+	Metric            string     `json:"metric"`
+	Detail            string     `json:"detail"`
+	InvestigationSQL  string     `json:"investigation_sql,omitempty"` // Legacy input only; forbidden in new reports.
+	InvestigationPlan []string   `json:"investigation_plan"`
+	Evidence          []Evidence `json:"evidence"`
+}
+
+// Evidence references an exact source value, never a model-computed replacement.
+type Evidence struct {
+	Query     string `json:"query"`
+	Column    string `json:"column"`
+	Value     string `json:"value"`
+	RowMetric string `json:"row_metric"`
 }
 
 type GuidelineDraft struct {
@@ -48,11 +58,17 @@ var reportResponseSchema = map[string]any{
 			"items": map[string]any{
 				"type": "OBJECT",
 				"properties": map[string]any{
-					"metric":            map[string]any{"type": "STRING"},
-					"detail":            map[string]any{"type": "STRING"},
-					"investigation_sql": map[string]any{"type": "STRING"},
+					"metric":             map[string]any{"type": "STRING"},
+					"detail":             map[string]any{"type": "STRING"},
+					"investigation_plan": map[string]any{"type": "ARRAY", "items": map[string]any{"type": "STRING"}},
+					"evidence": map[string]any{"type": "ARRAY", "items": map[string]any{
+						"type": "OBJECT", "properties": map[string]any{
+							"query": map[string]any{"type": "STRING"}, "column": map[string]any{"type": "STRING"}, "value": map[string]any{"type": "STRING"},
+							"row_metric": map[string]any{"type": "STRING"},
+						}, "required": []string{"query", "column", "value", "row_metric"},
+					}},
 				},
-				"required": []string{"metric", "detail"},
+				"required": []string{"metric", "detail", "investigation_plan", "evidence"},
 			},
 		},
 		"failed_metrics": map[string]any{"type": "ARRAY", "items": map[string]any{"type": "STRING"}},
@@ -87,16 +103,10 @@ func New(apiKey, model string) *Client {
 // is non-nil it is sent so the model is constrained to that exact shape.
 func (c *Client) GenerateJSON(ctx context.Context, system, user string, responseSchema any) (string, error) {
 	url := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		c.Model, c.APIKey,
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
+		c.Model,
 	)
-	genConfig := map[string]any{
-		"temperature":      0.2,
-		"responseMimeType": "application/json",
-	}
-	if responseSchema != nil {
-		genConfig["responseSchema"] = responseSchema
-	}
+	genConfig := generationConfig(responseSchema)
 	body := map[string]any{
 		"systemInstruction": map[string]any{
 			"parts": []map[string]string{{"text": system}},
@@ -118,6 +128,7 @@ func (c *Client) GenerateJSON(ctx context.Context, system, user string, response
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", c.APIKey)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -200,4 +211,55 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// CountReportTokens sends the same prompt and response schema as generation.
+// Byte limits are an independent local safety bound, not a token estimate.
+func (c *Client) CountReportTokens(ctx context.Context, system, user string) (int, error) {
+	body := map[string]any{"generateContentRequest": map[string]any{
+		"model":             "models/" + c.Model,
+		"systemInstruction": map[string]any{"parts": []map[string]string{{"text": system}}},
+		"contents":          []map[string]any{{"role": "user", "parts": []map[string]string{{"text": user}}}},
+		"generationConfig":  ReportGenerationConfig(),
+	}}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:countTokens", c.Model)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", c.APIKey)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("countTokens status %d", resp.StatusCode)
+	}
+	var count struct {
+		TotalTokens int `json:"totalTokens"`
+	}
+	if err = json.NewDecoder(resp.Body).Decode(&count); err != nil {
+		return 0, err
+	}
+	if count.TotalTokens <= 0 {
+		return 0, fmt.Errorf("countTokens returned invalid total")
+	}
+	return count.TotalTokens, nil
+}
+
+// ReportGenerationConfig is persisted with context so replay can reconstruct
+// the output schema and decoding parameters after code changes.
+func ReportGenerationConfig() map[string]any { return generationConfig(reportResponseSchema) }
+func generationConfig(schema any) map[string]any {
+	cfg := map[string]any{"temperature": 0.2, "responseMimeType": "application/json"}
+	if schema != nil {
+		cfg["responseSchema"] = schema
+	}
+	return cfg
 }

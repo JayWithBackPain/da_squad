@@ -80,6 +80,10 @@ deploy_target() {
   [[ -z "${fn}" ]] && { echo "[deploy] deploy.${target}.function_name 為空"; exit 1; }
   [[ -z "${timeout}" ]] && timeout=900
   [[ -z "${memory}"  ]] && memory=1024
+  if [[ "${target}" == "slack" && "${timeout}" -lt 900 ]]; then
+    timeout=900
+    log "Slack Lambda 同時執行背景回放分析，timeout 設為 900 秒；HTTP ack deadline 不變"
+  fi
 
   log "編譯 ${target}（GOOS=linux GOARCH=${GOARCH_TARGET}）..."
   # bootstrap＝provided.al2023 規定的入口檔名；lambda.norpc 去掉用不到的 rpc，縮小體積
@@ -88,7 +92,9 @@ deploy_target() {
 
   log "打包 ${zip}..."
   rm -f "${zip}"
-  zip -r "${zip}" bootstrap "config/${PRODUCT}" "queries/${PRODUCT}" >/dev/null
+  local assets=(bootstrap "config/${PRODUCT}" "queries/${PRODUCT}")
+  [[ -d "knowledge/${PRODUCT}" ]] && assets+=("knowledge/${PRODUCT}")
+  zip -r "${zip}" "${assets[@]}" >/dev/null
   ls -lh "${zip}"
 
   if ! aws_cmd lambda get-function --function-name "${fn}" >/dev/null 2>&1; then
@@ -111,6 +117,9 @@ deploy_target() {
       --function-name "${fn}" \
       --zip-file "fileb://${zip}" \
       --query 'LastUpdateStatus' --output text
+    aws_cmd lambda wait function-updated --function-name "${fn}"
+    # Replay self-invokes need enough time; preserve existing env, role and memory.
+    aws_cmd lambda update-function-configuration --function-name "${fn}" --timeout "${timeout}" >/dev/null
   fi
 
   rm -f bootstrap "${zip}"

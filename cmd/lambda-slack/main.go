@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"github.com/jay/da-agents/internal/memory"
 	"log"
 	"os"
 
@@ -12,7 +14,6 @@ import (
 	awslambda "github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/awslabs/aws-lambda-go-api-proxy/httpadapter"
-
 	"github.com/jay/da-agents/internal/config"
 	"github.com/jay/da-agents/internal/httpapi"
 	"github.com/jay/da-agents/internal/pipeline"
@@ -34,6 +35,7 @@ var (
 	feedback     *pipeline.FeedbackDeps
 	adapter      *httpadapter.HandlerAdapterV2
 	lambdaClient *awslambda.Client
+	replayCfg    *config.Config
 	selfName     = os.Getenv("AWS_LAMBDA_FUNCTION_NAME") // set by the Lambda runtime
 )
 
@@ -50,6 +52,7 @@ func init() {
 	if err := cfg.ValidateServer(); err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	replayCfg = cfg
 	feedback, err = pipeline.OpenFeedback(cfg)
 	if err != nil {
 		log.Fatalf("open: %v", err)
@@ -65,6 +68,7 @@ func init() {
 		SigningSecret:     cfg.Slack.SigningSecret,
 		Feedback:          feedback,
 		EnqueueCorrection: enqueueCorrection,
+		EnqueueReplay:     enqueueReplay,
 	}
 	adapter = httpadapter.NewV2(h.Mux())
 }
@@ -85,12 +89,41 @@ func enqueueCorrection(ctx context.Context, job pipeline.CorrectionJob) error {
 	return err
 }
 
+func enqueueReplay(ctx context.Context, job pipeline.ReplayJob) error {
+	payload, err := json.Marshal(struct {
+		DAJob string `json:"da_job"`
+		pipeline.ReplayJob
+	}{"replay_day", job})
+	if err != nil {
+		return err
+	}
+	_, err = lambdaClient.Invoke(ctx, &awslambda.InvokeInput{FunctionName: &selfName, InvocationType: lambdatypes.InvocationTypeEvent, Payload: payload})
+	return err
+}
+
 // handler dispatches on event shape: our async distill job vs an HTTP request.
 func handler(ctx context.Context, raw json.RawMessage) (any, error) {
 	var probe struct {
 		DAJob string `json:"da_job"`
 	}
 	_ = json.Unmarshal(raw, &probe)
+	if probe.DAJob == "replay_day" {
+		var job pipeline.ReplayJob
+		if err := json.Unmarshal(raw, &job); err != nil {
+			return nil, err
+		}
+		err := pipeline.ExecuteReplay(ctx, replayCfg, job)
+		pipeline.NotifyReplayResult(replayCfg, job, err)
+		// Review-gate rejections are user decisions, not AWS retryable jobs. A claimed
+		// analysis failure is durably blocked and requires explicit operator recovery.
+		if err != nil {
+			log.Printf("replay: %v", err)
+		}
+		if errors.Is(err, memory.ErrReplayReview) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	if probe.DAJob == distillMarker {
 		var evt asyncEvent
 		if err := json.Unmarshal(raw, &evt); err != nil {

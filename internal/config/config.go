@@ -3,16 +3,18 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
+	"time"
+	_ "time/tzdata"
 
 	appruntime "github.com/jay/da-agents/internal/runtime"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
+	Product  string         `yaml:"-"`
 	Database DatabaseConfig `yaml:"database"`
 	Gemini   GeminiConfig   `yaml:"gemini"`
 	Slack    SlackConfig    `yaml:"slack"`
@@ -45,10 +47,16 @@ type ServerConfig struct {
 }
 
 type AnalyzeConfig struct {
-	QueryDir        string `yaml:"query_dir"`
-	ReportDate      string `yaml:"report_date"`
-	Workers         int    `yaml:"workers"`
-	MaxRowsPerQuery int    `yaml:"max_rows_per_query"`
+	QueryDir          string `yaml:"query_dir"`
+	ReportDate        string `yaml:"report_date"`
+	Workers           int    `yaml:"workers"`
+	MaxRowsPerQuery   int    `yaml:"max_rows_per_query"`
+	KnowledgePath     string `yaml:"knowledge_path"`
+	Timezone          string `yaml:"timezone"`
+	MaxInputTokens    int    `yaml:"max_input_tokens"`
+	MaxInputBytes     int    `yaml:"max_input_bytes"`
+	MaxKnowledgeBytes int    `yaml:"max_knowledge_bytes"`
+	MaxKnowledgeItems int    `yaml:"max_knowledge_items"`
 }
 
 // Load reads config/<product>/config.yaml relative to runtime.RootDir.
@@ -56,12 +64,15 @@ func Load(product string) (*Config, error) {
 	if product == "" {
 		product = "goodnight"
 	}
+	if !regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`).MatchString(product) {
+		return nil, fmt.Errorf("invalid product name %q", product)
+	}
 	path, err := appruntime.Resolve("config", product, "config.yaml")
 	if err != nil {
 		return nil, err
 	}
 	if _, err := os.Stat(path); err != nil {
-		example := filepath.Join(filepath.Dir(path), "config.example.yaml")
+		example, _ := appruntime.Resolve("config", "default", "config.example.yaml")
 		return nil, fmt.Errorf("config not found at %s (copy %s to config.yaml): %w", path, example, err)
 	}
 	data, err := os.ReadFile(path)
@@ -72,11 +83,15 @@ func Load(product string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	cfg.Product = product
 	applyEnvOverrides(&cfg)
 	return &cfg, nil
 }
 
 func applyEnvOverrides(cfg *Config) {
+	if cfg.Product == "" {
+		cfg.Product = "goodnight"
+	}
 	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
 		cfg.Gemini.APIKey = v
 	}
@@ -112,12 +127,36 @@ func applyEnvOverrides(cfg *Config) {
 	if cfg.Analyze.MaxRowsPerQuery <= 0 {
 		cfg.Analyze.MaxRowsPerQuery = 200
 	}
+	if cfg.Analyze.Timezone == "" {
+		cfg.Analyze.Timezone = "Asia/Taipei"
+	}
+	if cfg.Analyze.MaxInputTokens == 0 {
+		cfg.Analyze.MaxInputTokens = 12000
+	}
+	if cfg.Analyze.MaxInputBytes == 0 {
+		cfg.Analyze.MaxInputBytes = 60000
+	}
+	if cfg.Analyze.MaxKnowledgeBytes == 0 {
+		cfg.Analyze.MaxKnowledgeBytes = 8000
+	}
+	if cfg.Analyze.MaxKnowledgeItems == 0 {
+		cfg.Analyze.MaxKnowledgeItems = 12
+	}
+	if cfg.Analyze.KnowledgePath == "" {
+		cfg.Analyze.KnowledgePath = "knowledge/" + cfg.Product + "/catalog.yaml"
+	}
+	if cfg.Analyze.KnowledgePath == "-" {
+		cfg.Analyze.KnowledgePath = ""
+	}
 	if cfg.Analyze.QueryDir == "" {
-		cfg.Analyze.QueryDir = "queries/goodnight"
+		cfg.Analyze.QueryDir = "queries/" + cfg.Product
 	}
 }
 
 func (c *Config) Validate() error {
+	if err := c.ValidateAnalyzeSettings(); err != nil {
+		return err
+	}
 	var missing []string
 	if strings.TrimSpace(c.Database.Redshift.ConnStr) == "" {
 		missing = append(missing, "database.redshift.conn_str (or REDSHIFT_CONN_STR)")
@@ -154,6 +193,25 @@ func (c *Config) ValidateServer() error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required config for server: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// ValidateAnalyzeSettings is usable before opening any external connections.
+func (c *Config) ValidateAnalyzeSettings() error {
+	if _, err := time.LoadLocation(c.Analyze.Timezone); err != nil {
+		return fmt.Errorf("analyze.timezone: %w", err)
+	}
+	if c.Analyze.ReportDate != "" {
+		if _, err := time.Parse("2006-01-02", c.Analyze.ReportDate); err != nil {
+			return fmt.Errorf("analyze.report_date: %w", err)
+		}
+	}
+	if c.Analyze.MaxInputTokens <= 0 || c.Analyze.MaxInputBytes <= 0 || c.Analyze.MaxKnowledgeBytes <= 0 || c.Analyze.MaxKnowledgeItems <= 0 {
+		return fmt.Errorf("analyze budgets must be positive")
+	}
+	if c.Analyze.MaxKnowledgeBytes > c.Analyze.MaxInputBytes {
+		return fmt.Errorf("knowledge byte budget must not exceed total input byte budget")
 	}
 	return nil
 }

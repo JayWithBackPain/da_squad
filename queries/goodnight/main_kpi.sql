@@ -2,8 +2,8 @@
 
 WITH RECURSIVE
     params AS (
-        SELECT (CURRENT_DATE - 1)::date AS report_date,
-            (CURRENT_DATE - 60)::date AS start_date
+        SELECT ({{run_date}} - 1)::date AS report_date,
+            ({{run_date}} - 60)::date AS start_date
     ),
 
 -- 1. 建立連續日期，確保 LAG(7) 永遠代表 7 天前
@@ -25,7 +25,7 @@ WITH RECURSIVE
 
         FROM datamart.daily_user_activities dua
                  CROSS JOIN params p
-        WHERE dua.dt BETWEEN p.start_date AND p.report_date + 1
+        WHERE dua.dt >= p.start_date AND dua.dt < p.report_date + 1
         GROUP BY dua.dt
     ),
 

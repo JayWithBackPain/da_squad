@@ -1,161 +1,99 @@
-# 打包與部署（deploy.sh）
+# 打包與部署
 
-本文件說明如何用 [`deploy.sh`](../deploy.sh) 從本機打包，到首次部署／之後更新兩個 Lambda（`lambda-analyze`、`lambda-slack`）。
+`deploy.sh <product>` 從 `config/<product>/config.yaml` 的 deploy 區塊讀取設定，建立／更新 analyze 與 slack 兩個 Lambda。product 是必填參數；腳本會上傳部署，不是只產生本機 zip。
 
-## 產出物
+## V1 learning loop 的部署順序
+
+先套用 [002 migration](../migrations/002_learning_loop.sql) 、[003 migration](../migrations/003_feedback_reviews.sql) 與 [004 migration](../migrations/004_replay.sql)，再更新程式。既有 `da_squad.agent_guidelines` 不變；執行角色需能寫入新 run/payload/feedback 表，feedback ingestion 使用 transaction table lock。
+
+新安裝需要 001–004；已有原 guideline 表的安裝套用 002–004。003 新增 PO review 稽核表，004 新增回放 session、attempt 與 knowledge release。詳細設定、回滾與 feedback retry 見 [WORKFLOW.md](WORKFLOW.md)。
+
+## 本機設定
 
 ```bash
-./deploy.sh [product]          # product 預設 goodnight
+mkdir -p config/goodnight
+cp config/default/config.example.yaml config/goodnight/config.yaml
+psql "$REDSHIFT_CONN_STR" -v ON_ERROR_STOP=1 -f migrations/002_learning_loop.sql
+psql "$REDSHIFT_CONN_STR" -v ON_ERROR_STOP=1 -f migrations/003_feedback_reviews.sql
+psql "$REDSHIFT_CONN_STR" -v ON_ERROR_STOP=1 -f migrations/004_replay.sql
 ```
 
-會在 `dist/` 產生：
+新安裝另需先套用 001；da_squad schema 由既有環境管理。同名表若已存在但欄位不同，CREATE TABLE IF NOT EXISTS 不會升級，先核對定義。
 
-| 檔案 | 用途 |
-|------|------|
-| `dist/lambda-analyze.zip` | 每日分析（EventBridge 觸發） |
-| `dist/lambda-slack.zip` | Slack Interactive Webhook |
+```yaml
+analyze:
+  timezone: Asia/Taipei
+  knowledge_path: ""  # 自動選 knowledge/<product>/catalog.yaml；"-" 明確停用
+  max_input_tokens: 12000
+  max_input_bytes: 60000
+  max_knowledge_bytes: 8000
+  max_knowledge_items: 12
+```
 
-每個 zip 內含：
-
-- `bootstrap` — Go 編譯的 Lambda 入口（`provided.al2023`）
-- `config/<product>/config.yaml` — 打包當下的設定（無則用 example）
-- `queries/<product>/*.sql` — 分析 SQL
-
-預設編譯目標：`linux/arm64`（可用環境變數覆寫）。
+query_dir 空白時按產品選 queries/<product>。無效日期、timezone 與負數／矛盾預算在連線前拒絕。knowledge YAML 依產品打包，預設會載入；draft 不影響分析。知識停用時 legacy DB guidelines 仍經預算選取。
 
 ## 前置條件
 
-1. 本機 Go（預設尋找 `$HOME/sdk/go1.26.4/bin`）
-2. AWS CLI 已登入，且有更新目標 Lambda 的權限（若要用腳本自動上傳）
-3. Lambda runtime：`provided.al2023`，handler：`bootstrap`，架構與 zip 一致（預設 arm64）
-4. Redshift 已套用 `migrations/001_agent_memory.sql`（guidelines／feedback 與分析同叢集）
-5. 建議 secrets 用 **Lambda 環境變數**，不要把密碼打進 zip 內的 yaml
+- Go 1.26.4；腳本在找不到 go 時會嘗試 `$HOME/sdk/go1.26.4/bin`。
+- yq、zip 與已登入的 AWS CLI。
+- `config/<product>/config.yaml` 及 `queries/<product>`。
+- deploy.lambda_role 與兩個 function_name。runtime 使用 provided.al2023，handler 為 bootstrap。
 
-### 建議環境變數（兩個 Lambda 都可設）
+部署設定全部讀 YAML，architecture 預設 arm64，可填 x86_64。region／aws_profile 留空時使用 AWS CLI 預設。
 
-| 變數 | 說明 |
-|------|------|
-| `DA_AGENT_PRODUCT` | 對應 `config/<product>`，預設 `default` |
-| `REDSHIFT_CONN_STR` | Redshift（分析 SQL + memory 表） |
-| `GEMINI_API_KEY` | Gemini |
-| `SLACK_BOT_TOKEN` | `xoxb-...` |
-| `SLACK_SIGNING_SECRET` | 驗證 Interactive Request（slack Lambda 必填） |
-| `SLACK_CHANNEL_ID` | 報告 Channel（analyze 必填） |
-| `DA_AGENT_WORKERS` | worker 數（可選） |
-
-## 首次部署
-
-### 1. 打包
-
-```bash
-cp config/goodnight/config.example.yaml config/goodnight/config.yaml
-# 可只放非敏感預設；連線字串建議之後用 Lambda env
-
-chmod +x deploy.sh
-./deploy.sh goodnight
+```yaml
+deploy:
+  region: ""
+  aws_profile: ""
+  lambda_role: "arn:aws:iam::<account>:role/<role>"
+  architecture: arm64
+  analyze:
+    function_name: da-agents-analyze
+    timeout: 900
+    memory_size: 1024
+  slack:
+    function_name: da-agents-slack
+    timeout: 900
+    memory_size: 512
 ```
 
-### 2. 建立 Lambda（若尚未建立）
-
-在 AWS Console 或 CLI 建立兩個函數，例如：
-
-- `da-agents-analyze`
-- `da-agents-slack`
-
-設定：
-
-- Runtime：`provided.al2023`
-- Architecture：`arm64`（若你改了 `GOARCH_TARGET=amd64` 則用 x86_64）
-- Handler：`bootstrap`
-- Timeout：analyze 建議 ≥ 5 分鐘；slack ≥ 30 秒
-- Memory：analyze 建議 ≥ 512 MB
-- VPC：若 Redshift 在私有網段，Lambda 需進相同 VPC 並開對應 SG
-
-上傳對應 zip，並設定上表環境變數。
-
-### 3. 綁定觸發
-
-| 函數 | 觸發 |
-|------|------|
-| analyze | EventBridge Schedule（例如每天 09:00） |
-| slack | Function URL 或 API Gateway HTTP API，路徑需能打到 `/slack/interactions` |
-
-Slack App → **Interactivity Request URL** 指向：
-
-```text
-https://<function-url-or-apigw>/slack/interactions
-```
-
-### 4. 一鍵上傳（可選）
-
-若函數已存在，可在打包後自動 `UpdateFunctionCode`：
-
-```bash
-export AWS_LAMBDA_ANALYZE_NAME=da-agents-analyze
-export AWS_LAMBDA_SLACK_NAME=da-agents-slack
-# 可選：AWS_PROFILE / AWS_REGION
-./deploy.sh goodnight
-```
-
-未設定上述兩個名稱時，腳本只打包，不呼叫 AWS。
-
-## 之後更新（程式／SQL／設定）
-
-日常流程：
-
-```bash
-# 1. 改 code 或 queries/<product>/*.sql
-# 2. 重新打包（+ 可選自動更新 Lambda）
-export AWS_LAMBDA_ANALYZE_NAME=da-agents-analyze
-export AWS_LAMBDA_SLACK_NAME=da-agents-slack
-./deploy.sh goodnight
-```
-
-| 你改了什麼 | 要不要重部署 | 備註 |
-|------------|--------------|------|
-| Go 程式 | 要 | 重跑 `deploy.sh` |
-| `queries/*.sql` | 要 | SQL 打進 zip，改完必須重打包 |
-| `config.yaml` 打進 zip 的欄位 | 要 | 或改用 Lambda env，改 env 不必重打包 |
-| Lambda 環境變數 / Timeout / VPC | 不必重打包 | Console 或 `aws lambda update-function-configuration` |
-| Redshift guidelines／feedback | 不必 | 寫表即可，下次分析自動生效 |
-| Slack App URL / Signing Secret | 不必重打包 | 改 Slack 設定或 Lambda env |
-
-### 手動更新（不用腳本上傳時）
+## 打包內容與執行
 
 ```bash
 ./deploy.sh goodnight
-
-aws lambda update-function-code \
-  --function-name da-agents-analyze \
-  --zip-file fileb://dist/lambda-analyze.zip
-
-aws lambda update-function-code \
-  --function-name da-agents-slack \
-  --zip-file fileb://dist/lambda-slack.zip
 ```
 
-等 `LastUpdateStatus=Successful` 後再測。
+每個包包含 bootstrap、config/<product>、queries/<product>，以及存在時的 knowledge/<product>。使用暫存 deployed_<product>_<target>.zip，完成後移除 bootstrap／zip；不保留 dist/ 產物。
 
-## 腳本環境變數一覽
+不要把機密寫進打包的 YAML；以 Lambda env 提供 REDSHIFT_CONN_STR、GEMINI_API_KEY、SLACK_BOT_TOKEN、SLACK_SIGNING_SECRET、SLACK_CHANNEL_ID。
 
-| 變數 | 預設 | 說明 |
-|------|------|------|
-| 第一個參數 `product` | `default` | `config/`、`queries/` 子目錄名 |
-| `GOOS_TARGET` | `linux` | 編譯 OS |
-| `GOARCH_TARGET` | `arm64` | 編譯架構（`amd64` 亦可） |
-| `AWS_LAMBDA_ANALYZE_NAME` | （空） | 有值則上傳 analyze zip |
-| `AWS_LAMBDA_SLACK_NAME` | （空） | 有值則上傳 slack zip |
-| `AWS_PROFILE` / `AWS_REGION` | CLI 預設 | 傳給 aws 指令 |
+新建函數只帶 DA_AGENT_PRODUCT／DEPLOY_TIME，需再補機密設定。既有函數更新 code 與 timeout，保留 env、memory 與 role。slack Lambda 背景執行完整回放分析，deploy.sh 會將其 timeout 至少設為 900 秒；HTTP handler 的 3 秒內 ack 預算保持不變。memory 或 role 變更需另行更新 configuration。
+
+analyze 綁定 EventBridge。slack 使用 Function URL／API Gateway，路徑 `/slack/interactions`，Slack App 設定 Interactivity URL。slack execution role 需要 lambda:InvokeFunction 指向自身，供背景 candidate 提煉與逐日 replay。該角色也需有原本 analyze 所需的 Redshift 網路／讀寫與 Gemini 連線能力。
 
 ## 驗證
 
-1. **Analyze**：Console 對 `da-agents-analyze` 發 Test（空 JSON `{}`）或等排程；Slack Channel 應出現日報。
-2. **Slack**：點「準確／糾正」；CloudWatch 無簽名錯誤；Redshift `agent_feedback` / `agent_guidelines` 有新列。
-3. **本機對照**：同一套 config，先用 `go run ./cmd/analyze` 確認 SQL／Gemini／Slack 正常，再上雲。
+確認一份新報告有 run 紀錄與 input/context/report/validation payload。按糾正後先確認原文已進 da_squad.feedback，再確認 status 變 candidate；候選不應自動新增 active guideline。
 
-## 常見問題
+量測 Redshift ingestion 與 Lambda self-invoke 延遲，確認 Slack modal 不逾時。pending／failed 可使用 `cmd/feedback` 重試。核對 token overflow 會保留 failed run 而非正常報告。
 
-- **zip 裡還是 example config**：確認已建立 `config/<product>/config.yaml`，或完全依賴 Lambda env。
-- **連不到 Redshift**：檢查 Lambda VPC、SG、連線字串、`sslmode`。
-- **Slack 401 signature**：`SLACK_SIGNING_SECRET` 與 App 後台不一致，或 body 被 API Gateway 改寫。
-- **架構不符**：`GOARCH_TARGET` 必須與 Lambda Architecture 一致。
+一般每日分析的 knowledge YAML 修改需重新部署；歷史回放可透過 cmd/knowledge -publish 更新 Redshift catalog，不需重新部署。既有 DB guidelines 修改會在下一個 run 重讀。回滾程式／YAML 可使用前版部署包，保留新增資料表與歷史紀錄。
+
+## 延遲與回復限制
+
+Redshift write／table lock 可能超過 Slack deadline。Modal 保存預算 1.8 秒、enqueue 0.5 秒，整個 handler 約 2.5 秒 context 上限；仍須量測網路與提交延遲。DB 未確認保存就返回 modal error，保留 PO 輸入。
+
+原文已保存但 enqueue 失敗時清除 modal，留在 pending，使用 feedback-list／retry-pending 恢復。尚無耐久 outbox／自動掃描器。本機背景工作有 3 分鐘 timeout；進程中止也需 recovery。
+
+Slack 已送出而 mapping 寫入失敗時，依 log 的 run/channel/ts 核對；delivery_unknown 不盲目重發。回滾 YAML／程式版本時保留 run、feedback 與 review 稽核，不刪除 DB 表。
+
+
+## Slack thread feedback 與回放啟用
+
+Interactivity URL：`https://<endpoint>/slack/interactions`，供準確、糾正與下一天按鈕。
+
+Events API Request URL：`https://<endpoint>/slack/events`。啟用 Event Subscriptions；公開 channel 訂閱 `message.channels` 並授予 bot `channels:history`，私人 channel 訂閱 `message.groups` 並授予 `groups:history`。權限變更後重新安裝 Slack App，邀請 bot 進入回放 channel。保留原本 chat:write 與 Interactivity 設定。API Gateway 若有固定路由，也須加入 /slack/events；Function URL 直接由 Go mux 分流。
+
+驗證 challenge 後，在新報告 thread 回覆一則文字，確認 feedback 保存與 candidate 生成。Events ingestion 若 DB/queue 失敗會回 503，讓 Slack retry；event_id 保持一致，不新增重複 feedback。仍可能有 pending，使用 recovery CLI。
+
+開始前可先 `TO=2026-01-03` 做三天試跑，再建立完整 session；完整 session 的日期與 channel 在建立時固定。Lambda 在同一函數 self-invoke 背景分析，沒有新增 Lambda／SQS；需實測 warehouse、Slack 寫入 deadline 及 Lambda timeout。不要把 test pass 當成已部署或已驗證線上 Redshift。
